@@ -27,7 +27,13 @@ class InsalesClient:
             response = await client.get(url)
             response.raise_for_status()
             payload = response.json()
-        account_data = payload.get("account", {})
+
+        account_data = {}
+        if isinstance(payload, dict):
+            # InSales может отдавать данные либо в корне, либо вложенными в account
+            nested = payload.get("account")
+            account_data = nested if isinstance(nested, dict) else payload
+
         paid_till_str = account_data.get("paid_till")
         paid_till = date.fromisoformat(paid_till_str) if paid_till_str else None
         return InsalesAccountInfo(paid_till=paid_till)
