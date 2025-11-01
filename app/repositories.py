@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Account, TelegramChat
@@ -76,6 +76,8 @@ class ChatRepository:
         username: Optional[str],
         first_name: Optional[str],
         last_name: Optional[str],
+        is_admin: Optional[bool] = None,
+        is_super_admin: Optional[bool] = None,
     ) -> TelegramChat:
         existing = await self.session.execute(select(TelegramChat).where(TelegramChat.chat_id == chat_id))
         chat = existing.scalars().first()
@@ -89,8 +91,16 @@ class ChatRepository:
                 username=username,
                 first_name=first_name,
                 last_name=last_name,
+                is_admin=bool(is_admin) if is_admin is not None else False,
+                is_super_admin=bool(is_super_admin) if is_super_admin is not None else False,
             )
             self.session.add(chat)
+        if is_admin is not None:
+            chat.is_admin = bool(is_admin)
+        if is_super_admin is not None:
+            chat.is_super_admin = bool(is_super_admin)
+        if chat.is_super_admin and not chat.is_admin:
+            chat.is_admin = True
         await self.session.commit()
         await self.session.refresh(chat)
         return chat
@@ -98,3 +108,26 @@ class ChatRepository:
     async def list_chats(self) -> Iterable[TelegramChat]:
         result = await self.session.execute(select(TelegramChat))
         return list(result.scalars().all())
+
+    async def list_admin_chats(self) -> Iterable[TelegramChat]:
+        result = await self.session.execute(
+            select(TelegramChat).where(TelegramChat.is_admin.is_(True))
+        )
+        return list(result.scalars().all())
+
+    async def get_chat(self, chat_id: str) -> Optional[TelegramChat]:
+        result = await self.session.execute(select(TelegramChat).where(TelegramChat.chat_id == chat_id))
+        return result.scalars().first()
+
+    async def set_admin_status(self, chat_id: str, is_admin: bool) -> Tuple[Optional[TelegramChat], bool]:
+        result = await self.session.execute(select(TelegramChat).where(TelegramChat.chat_id == chat_id))
+        chat = result.scalars().first()
+        if not chat:
+            return None, False
+        if chat.is_super_admin:
+            # Super admin always retains admin rights
+            return chat, False
+        chat.is_admin = is_admin
+        await self.session.commit()
+        await self.session.refresh(chat)
+        return chat, True
