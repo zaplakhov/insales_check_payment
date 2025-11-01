@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
-from typing import Callable
+from datetime import date, datetime
+from typing import Callable, Optional
 
 import logging
 
@@ -9,6 +9,7 @@ import httpx
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..repositories import AccountRepository, ChatRepository
 from ..telegram_bot.bot import TelegramNotifier
 from .insales import InsalesClient
@@ -90,5 +91,21 @@ class PaymentNotifier:
                 else:
                     continue
 
+                if self._is_quiet_time():
+                    logger.info("Пропуск уведомлений для %s из-за времени тишины", account.title)
+                    continue
+
                 await self._telegram_notifier.broadcast_message(message, chats)
                 await account_repo.update_last_notified(account, today)
+
+    def _is_quiet_time(self, now: Optional[datetime] = None) -> bool:
+        start = settings.quiet_hours_start
+        end = settings.quiet_hours_end
+        if start is None or end is None:
+            return False
+
+        current = (now or datetime.now(settings.timezone)).time()
+        if start <= end:
+            return start <= current < end
+        # Quiet window spans midnight.
+        return current >= start or current < end
